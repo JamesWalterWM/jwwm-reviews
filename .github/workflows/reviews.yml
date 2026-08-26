@@ -3,34 +3,43 @@ on:
   schedule:
     - cron: '0 9 * * *'
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Fetch rating
         env:
           KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           PLACE_ID: ${{ vars.PLACE_ID }}
         run: |
           mkdir -p docs
-          curl -s "https://places.googleapis.com/v1/places/${PLACE_ID}?fields=rating&key=${KEY}" \
+          curl -s "https://places.googleapis.com/v1/places/${PLACE_ID}?fields=rating,userRatingCount,reviews&key=${KEY}" \
             -H "Content-Type: application/json" \
             | python3 -c "
           import sys, json, datetime
           d = json.load(sys.stdin)
           if 'rating' not in d:
               print('ERROR:', d); sys.exit(1)
-          out = {'rating': d['rating'], 'updated': datetime.date.today().isoformat()}
+          revs = []
+          for r in d.get('reviews', []):
+              revs.append({
+                'author': r.get('authorAttribution', {}).get('displayName', ''),
+                'when': r.get('relativePublishTimeDescription', ''),
+                'rating': r.get('rating', 5),
+                'text': (r.get('text') or {}).get('text', '')
+              })
+          out = {
+            'rating': d['rating'],
+            'count': d.get('userRatingCount'),
+            'updated': datetime.date.today().isoformat(),
+            'reviews': revs
+          }
           json.dump(out, open('docs/reviews.json','w'))
-          print(out)
+          print('ok:', len(revs), 'reviews |', out['rating'], '|', out['updated'])
           "
-
       - name: Commit
         run: |
           git config user.name "github-actions"
